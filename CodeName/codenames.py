@@ -229,29 +229,6 @@ class Player:
             return self.member.id == other.id
         return False
 
-    async def on_success(self):
-
-        remaining_hit_count = self.team.remaining_hit_count
-        if remaining_hit_count == 0:
-            await self.game.end(winner=self.team)
-
-        await self.game.update_game_messages(for_action=False, prioritized_player=self)
-
-    async def on_rival_button_selected(self, button: "KeywordButton"):
-        x, y = button.x, button.y
-        for team in self.teams:
-            sample_answerer: Player = team.players_on_answer[0]
-            rival_button = sample_answerer.keywords_view.get_button(x, y)
-            if rival_button.is_hit:
-                rival_button.style_solved()
-                rival_button.opposite.style_solved()
-                break
-        await self.game.advance_turn()
-
-    async def on_neutral_button_selected(self):
-        await self.advance_turn()
-
-
 class StrLog:
     """Manages logs. """
     hint_template = "ヒント：{keyword} {count}\n"
@@ -528,8 +505,6 @@ class KeywordButton(discord.ui.Button['CodeName']):
             spectator = await Player.get(author)
             game.spectators.append(spectator)
 
-        team = player.team
-
         game.add_log(player, word=self.name, result_emoji=self.get_result_emoji())
 
         if not player.is_answerer:
@@ -537,16 +512,16 @@ class KeywordButton(discord.ui.Button['CodeName']):
 
         if self.is_hit:
             self.style_solved()
-            await game.on_success(player)
+            await player.on_success()
         elif self.is_over:
             self.style_game_over()
-            await game.end(loser=team)
+            await player.end()
         elif self.is_rival_side:
             self.set_rival_style()
-            await game.on_rival_button_selected(self)
+            await player.on_rival_button_selected(self)
         else:
             self.set_neutral(player)
-            await game.on_neutral_button_selected()
+            await player.on_neutral_button_selected()
 
     def get_result_emoji(self):
         if self.is_hit:
@@ -799,6 +774,28 @@ class GameBase:
         else:
             await self.on_hint(player, message.content)
 
+    async def on_hint(self, player: Player, hint_str: str) -> None:
+
+        slice_length = 1
+        while len(hint_str) >= slice_length:
+            # Repeat since multiple characters might represent number. ex. 12
+            if self.hint_count is None:
+                try:
+                    translated = hint_str[-1 * slice_length:].translate(utils.for_std_num_trans)  # 漢数字なども
+                    self.hint_count = int(translated)
+                except ValueError:
+                    break
+                else:
+                    self.hint = hint_str[0:-1 * slice_length]
+            slice_length += 1
+
+        if self.hint_count is None:
+            self.hint = hint_str
+            self.hint_count = await player.ask_amount()
+
+        self.add_log(player, self.hint, self.hint_count)
+        await self.update_game_messages(for_keywords=False)
+
     async def on_suggest(self, player: Player, message_by_player):
         team = player.team
         hint_side_players = team.players_on_hint[::]  # copy to prevent bugs when the role of team members swap.
@@ -869,27 +866,26 @@ class GameBase:
                     except discord.errors.HTTPException:
                         pass
 
-    async def on_hint(self, player: Player, hint_str: str) -> None:
+    async def on_success(self, player: Player):
+        if player.team.remaining_hit_count == 0:
+            await self.end(winner=player.team)
 
-        slice_length = 1
-        while len(hint_str) >= slice_length:
-            # Repeat since multiple characters might represent number. ex. 12
-            if self.hint_count is None:
-                try:
-                    translated = hint_str[-1 * slice_length:].translate(utils.for_std_num_trans)  # 漢数字なども
-                    self.hint_count = int(translated)
-                except ValueError:
-                    break
-                else:
-                    self.hint = hint_str[0:-1 * slice_length]
-            slice_length += 1
+        await self.update_game_messages(for_action=False, prioritized_player=player)
 
-        if self.hint_count is None:
-            self.hint = hint_str
-            self.hint_count = await player.ask_amount()
+    async def on_rival_button_selected(self, button: "KeywordButton"):
+        x, y = button.x, button.y
+        for team in self.teams:
+            sample_answerer: Player = team.players_on_answer[0]
+            rival_button = sample_answerer.keywords_view.get_button(x, y)
+            if rival_button.is_hit:
+                rival_button.style_solved()
+                rival_button.opposite.style_solved()
+            else:
+                rival_button.set_rival_style()
+        await self.advance_turn()
 
-        self.add_log(player, self.hint, self.hint_count)
-        await self.update_game_messages(for_keywords=False)
+    async def on_neutral_button_selected(self):
+        await self.advance_turn()
 
     def add_log(self, player, word: str = None, result_emoji: str = None):
         is_answered = True if result_emoji is not None else False
