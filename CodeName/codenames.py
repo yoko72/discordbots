@@ -1,21 +1,17 @@
 import asyncio
-import collections  # type: ignore[import]
-import functools  # type: ignore[import]
-import inspect  # type: ignore[import]
 import logging
 import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from itertools import cycle
 from random import shuffle
-from typing import Union, Optional, List, Dict, Tuple, Callable  # type: ignore[import]
+from typing import Union, Optional, List, Dict, Tuple
 
 import discord
 from discord.ext import commands
 
-import utils
-from mylib import myinfo
-from mylib.cogs import RegisterAvatarEmoji
+from CountDownBot.cogs.avatar_emoji_register import AvatarEmojiRegister
+
 
 if __name__ == "__main__":
     log_format = "%(levelname)s\t%(name)s\t%(message)s\tlocation:%(pathname)s(%(lineno)s)\tfn:%(funcName)s"
@@ -32,7 +28,7 @@ if __name__ == "__main__":
 
 DEBUGGING = "DEBUGGING"  # for detecting if debugging in IDE or not
 
-AvatarCogName = RegisterAvatarEmoji.__name__
+AvatarCogName = AvatarEmojiRegister.__name__
 
 SECONDS_OF_RESEND_MESSAGE = 890
 
@@ -40,7 +36,7 @@ DEFAULT_ROW_COUNT = 5
 DEFAULT_COLUMN_COUNT = 5
 # The discord limit of row and column is 5 at maximum. 25 buttons at maximum in 1 message.
 
-DEFAULT_TIME_LIMITS = 7
+DEFAULT_TIME_LIMITS = 50
 
 # For cooperative mode
 DEFAULT_TURNS = 8
@@ -52,6 +48,9 @@ GOT_FAILED_EMOJI = "❌"
 emoji_options = """
 🔴⭕❌⛔✖📝🆚👍👎☠️🙅🙆🎊🥳💀👪⏲⏱⏰🐑🦔🐾✏️🦍❗❕‼️⚠️🆖🏴‍☠️🎲❓❔1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣
 """
+
+TWO_PERSONS_EMOJI = "🧑‍🤝‍🧑"
+MANY_PERSONS_EMOJI = "👪"
 # For ActionsView
 GAME_LOG_PLACEHOLDER = "回答ログ"
 GAME_LOG_ROW = 2
@@ -63,6 +62,7 @@ SUGGESTION = "提案"
 STOP_SUGGESTION = "提案を終える"
 HINT = "ヒント"
 CHECK = "チェック"
+END_CHECK = "チェックモードを終える"
 TURN_END = "ターンエンド"
 JOIN = "参加"
 SETTINGS = "設定"
@@ -141,8 +141,8 @@ class Player:
 
         try:
             await self.action_message.edit(content=sentence, view=action_view)
-        except (discord.errors.HTTPException, AttributeError):
-            self.action_message = await self.channel.send(sentence, view=action_view)
+        except (discord.errors.HTTPException, AttributeError) as e:
+            self.action_message = await self.channel.send(sentence, view=action_view) #error code: 50035
 
     async def show_game_messages(self) -> None:
         asyncio.create_task(self.show_keyword_message())
@@ -152,7 +152,7 @@ class Player:
         message = await self.channel.send("いくつのキーワードを想定してる？")
 
         async def add_num_emojis():
-            for emoji in utils.num_emojis[1::]:
+            for emoji in codenameにあったutils.num_emojis[1::]:
                 try:
                     await message.add_reaction(emoji=emoji)
                 except discord.errors.NotFound:
@@ -164,7 +164,7 @@ class Player:
             if user.bot:
                 return False
             if reaction.message == message:
-                if reaction.emoji in utils.num_emojis:
+                if reaction.emoji in codenameにあったutils.num_emojis:
                     return True
 
         try:
@@ -173,7 +173,7 @@ class Player:
             result = None
         else:
             result = None
-            for i, emoji in enumerate(utils.num_emojis[1::]):
+            for i, emoji in enumerate(codenameにあったutils.num_emojis[1::]):
                 if emoji == reaction.emoji:
                     result = i + 1
         finally:
@@ -187,7 +187,7 @@ class Player:
         return hash(self.member)
 
     async def get_icon(self) -> Optional[str]:  # This str be displayed as avatar emoji on discord.
-        avatar_cog: RegisterAvatarEmoji = bot.get_cog(AvatarCogName)
+        avatar_cog: AvatarEmojiRegister = bot.get_cog(AvatarCogName)
         if avatar_cog:
             avatar_emoji: discord.Emoji = await avatar_cog.get_avatar_emoji(member=self.member)
             if avatar_emoji:
@@ -228,6 +228,7 @@ class Player:
         if hasattr(other, "id"):
             return self.member.id == other.id
         return False
+
 
 class StrLog:
     """Manages logs. """
@@ -292,16 +293,16 @@ class StrLog:
         if count is None:
             count = "?"
         if player:
-            return self.hint_template.format(keyword, count)
+            return self.hint_template.format(keyword=keyword, count=count)
         else:
             return self.only_turn_count.format(self.turn_count)
 
     def add_answer(self, player: Player, answer_label: str, emoji: EmojiTypes):
+        if not self.current_hint_log:
+            self.add_hint(None, None)
         self.current_answer_log[player].append(self._make_answer_log(answer_label, emoji, player))
 
     def _make_answer_log(self, label: str, result_emoji: str, player: Player) -> str:
-        if not self.current_hint_log:
-            self.add_hint(None, None)
         if player == self.current_hinter:
             if "\n" in self.current_hint_log:
                 self.current_hint_log += label
@@ -318,15 +319,19 @@ class SelectLog(StrLog, discord.ui.Select):
 
     def add_answer(self, player: Player, answer_label: str, result_emoji: str):
         label = self._make_answer_log(answer_label, result_emoji, player)
-        self.add_option_with_icon(label, player)
+        super().add_answer(player, label, result_emoji)
+        self.add_option_with_icon(label, player.icon)
 
     def add_hint(self, player: Optional[Player], keyword: Optional[str], count: Optional[int] = None):
         super().add_hint(player, keyword, count)
-        self.add_option_with_icon(self.current_hint_log, player)
+        self.add_option_with_icon(self.current_hint_log, "❓")
 
-    def add_option_with_icon(self, label: str, player: Optional[Player]):
+    def add_option_with_icon(self, label: str, emoji):
+        for option in self.options:
+            if option.value == label:
+                label += " "
         try:
-            option = discord.SelectOption(label=label, emoji=player.icon)
+            option = discord.SelectOption(label=label, emoji=emoji)
         except (AttributeError, TypeError):
             option = discord.SelectOption(label=label)
         finally:
@@ -398,7 +403,7 @@ class Team:
     def __init__(self):
         self.players: List[Player] = []
         self.status_table = None
-        self.timer = utils.AioCountdown(self.DEFAULT_TIME_LIMITS * 60, self.lose_game)
+        self.timer = codenameにあったutils.AioCountdown(self.DEFAULT_TIME_LIMITS * 60, self.lose_game)
         self.on_turn = False
 
         self.players_on_hint = []
@@ -505,6 +510,11 @@ class KeywordButton(discord.ui.Button['CodeName']):
             spectator = await Player.get(author)
             game.spectators.append(spectator)
 
+        if player.is_on_check_mode:
+            self.style_checked(player)
+            await game.update_game_messages(prioritized_player=player)
+            return
+
         game.add_log(player, word=self.name, result_emoji=self.get_result_emoji())
 
         if not player.is_answerer:
@@ -512,16 +522,16 @@ class KeywordButton(discord.ui.Button['CodeName']):
 
         if self.is_hit:
             self.style_solved()
-            await player.on_success()
+            await game.on_success(player)
         elif self.is_over:
             self.style_game_over()
-            await player.end()
+            await game.end(loser=player.team)
         elif self.is_rival_side:
             self.set_rival_style()
-            await player.on_rival_button_selected(self)
+            await game.on_rival_button_selected(self, player)
         else:
             self.set_neutral(player)
-            await player.on_neutral_button_selected()
+            await game.on_neutral_button_selected(player)
 
     def get_result_emoji(self):
         if self.is_hit:
@@ -538,6 +548,15 @@ class KeywordButton(discord.ui.Button['CodeName']):
             button.disabled = True
             button.style = self.success_color
             button.is_solved = True
+
+    def style_checked(self, player):
+        for button in [self, self.opposite]:
+            if button.emoji is None:
+                button.emoji = player.icon
+            elif button.emoji == player.icon:
+                button.emoji = None
+            else:
+                button.emoji = MANY_PERSONS_EMOJI
 
     def style_game_over(self):
         for button in [self, self.opposite]:
@@ -695,7 +714,7 @@ class GameBase:
         self.action_messages: Dict[Player: discord.Message] = dict()
         self.spectators_view = None
         self.delta_timer = None
-        self.resend_task: Optional[utils.AioCountdown] = None
+        self.resend_task: Optional[codenameにあったutils.AioCountdown] = None
         self.teams: Union[List[Team]] = list(teams)
         self.spectators: Optional[List[Player]] = None
 
@@ -781,7 +800,7 @@ class GameBase:
             # Repeat since multiple characters might represent number. ex. 12
             if self.hint_count is None:
                 try:
-                    translated = hint_str[-1 * slice_length:].translate(utils.for_std_num_trans)  # 漢数字なども
+                    translated = hint_str[-1 * slice_length:].translate(codenameにあったutils.for_std_num_trans)  # 漢数字なども
                     self.hint_count = int(translated)
                 except ValueError:
                     break
@@ -793,7 +812,7 @@ class GameBase:
             self.hint = hint_str
             self.hint_count = await player.ask_amount()
 
-        self.add_log(player, self.hint, self.hint_count)
+        self.add_log(player)
         await self.update_game_messages(for_keywords=False)
 
     async def on_suggest(self, player: Player, message_by_player):
@@ -869,10 +888,11 @@ class GameBase:
     async def on_success(self, player: Player):
         if player.team.remaining_hit_count == 0:
             await self.end(winner=player.team)
+            return
 
         await self.update_game_messages(for_action=False, prioritized_player=player)
 
-    async def on_rival_button_selected(self, button: "KeywordButton"):
+    async def on_rival_button_selected(self, button: "KeywordButton", player: Player):
         x, y = button.x, button.y
         for team in self.teams:
             sample_answerer: Player = team.players_on_answer[0]
@@ -882,10 +902,10 @@ class GameBase:
                 rival_button.opposite.style_solved()
             else:
                 rival_button.set_rival_style()
-        await self.advance_turn()
+        await self.advance_turn(prioritized_player=player)
 
-    async def on_neutral_button_selected(self):
-        await self.advance_turn()
+    async def on_neutral_button_selected(self, player):
+        await self.advance_turn(prioritized_player=player)
 
     def add_log(self, player, word: str = None, result_emoji: str = None):
         is_answered = True if result_emoji is not None else False
@@ -899,7 +919,7 @@ class GameBase:
                 log.add_hint(player, hint, self.hint_count)
 
     async def keep_updating_timer(self):
-        with utils.AioDeltaSleeper() as delta_sleeper:
+        with AioDeltaSleeper() as delta_sleeper:
             while not self.is_over:
                 await delta_sleeper.wait(2)
                 for player in self.current_team.players:
@@ -988,7 +1008,7 @@ class GameBase:
         while len(word) < 5:
             word += "\u200b"
 
-    async def advance_turn(self):
+    async def advance_turn(self, prioritized_player=None):
         self.hint = None
         self.hint_count = None
         self.current_team.timer.cancel()
@@ -998,7 +1018,7 @@ class GameBase:
         self.current_team.timer.start()
         self.open_log.on_advance_turn()
         self.log_for_review.on_advance_turn()
-        await self.update_game_messages()
+        await self.update_game_messages(prioritized_player=prioritized_player)
 
     def get_player(self, id_: int) -> Player:
         for team in self.teams:
@@ -1014,9 +1034,16 @@ class GameBase:
         for task in [self.resend_task, self.edit_every_second_task, self.wait_emoji_task, self.wait_input_task]:
             if task is not None:
                 task.cancel()  # must catch some exceptions
-        await self.update_game_messages()
+        # await self.update_game_messages()
+        if winner is None:
+            for team in self.teams:
+                if team != loser:
+                    winner = team
+                    break
         game_log_str = "\n".join(self.log_for_review.output())
-        print(winner, loser, game_log_str)
+        for team in self.teams:
+            for player in team.players:
+                await player.channel.send(f"{winner}チームが勝利しました！" + game_log_str)
 
 
 class CooperativeGame(GameBase):
@@ -1026,13 +1053,13 @@ class CooperativeGame(GameBase):
         super().__init__(*teams, words=words)
         self.remaining_turns = self.DEFAULT_TURNS
 
-    async def advance_turn(self):
+    async def advance_turn(self, prioritized_player: Player = None):
         team = self.teams[0]
         self.remaining_turns -= 1
         if self.remaining_turns < 0:
             self.is_over = True
         team.players_on_answer, team.players_on_hint = team.players_on_hint, team.players_on_answer
-        await super().advance_turn()
+        await super().advance_turn(prioritized_player)
 
     def get_game_state(self, player: Player) -> str:
         sentence = f"""
@@ -1051,8 +1078,12 @@ class BattleRoyalGame(GameBase):
     pass
 
 
+commands.Cog.listener()
+
+
 def defer_response(coro):
     async def inner(*args, **kwargs):
+        logger.debug(f"defering {coro.__name__}")
         try:
             interaction = args[2]
         except IndexError:
@@ -1081,15 +1112,21 @@ class AnswerActionsView(discord.ui.View):
 
     @discord.ui.button(label=TURN_END, style=discord.ButtonStyle.primary)
     @defer_response
-    async def end_turn(self, _, __):
-        await self.game.advance_turn()
+    async def end_turn(self, _, interaction: discord.Interaction):
+        author = interaction.user
+        player = self.game.get_player(author.id)
+        await self.game.advance_turn(prioritized_player=player)
 
     @discord.ui.button(label=CHECK, style=discord.ButtonStyle.primary)
     @defer_response
-    async def check_mode(self, _, interaction: discord.Interaction):
+    async def check_mode(self, button, interaction: discord.Interaction):
         author = interaction.user
         player = self.game.get_player(author.id)
         player.is_on_check_mode = not player.is_on_check_mode
+        if button.label == CHECK:
+            button.label = END_CHECK
+        elif button.label == END_CHECK:
+            button.label = CHECK
         await self.game.update_game_messages()
 
 
@@ -1262,28 +1299,24 @@ class OpeningView(discord.ui.View):
 intents = discord.Intents.all()
 # intents.messages = False
 bot = discord.ext.commands.Bot("$", intents=intents)
-avatar_register_cog = RegisterAvatarEmoji(bot)
+avatar_register_cog = AvatarEmojiRegister(bot)
 bot.add_cog(avatar_register_cog)
 
 sample_view = None
 
 
-@bot.command()
-async def test(ctx: commands.Context):
-    global sample_view
-    sample_view = discord.ui.View()
-    select_menu = discord.ui.Select(custom_id="カスタムID!!!", placeholder="plaaaaaaaaace" * 100)
-    sample_view.add_item(select_menu)
-    sample_option = discord.SelectOption(label="ラベール")
-    select_menu.append_option(sample_option)
-    button = discord.ui.Button(label="aaaaaaaaaaaaaaaaaaaa" * 100)
-    sample_view.add_item(button)
-    await ctx.send("aiueo", view=sample_view)
+@bot.listen()
+async def on_interaction(interaction):
+    print(interaction)
+    try:
+        await interaction.response.defer() #print(interaction)
+    except discord.errors.NotFound:
+        pass
 
 
 @bot.command()
 async def debug(_):
-    guild = bot.get_guild(myinfo.servers_id.実験場)
+    guild = bot.get_guild(config.servers_id.実験場)
     tonkatu = guild.get_member(tonkatu_id)
     yaruzo = guild.get_member(yaruzo_id)
     players = await Player.get(tonkatu), await Player.get(yaruzo)
@@ -1313,17 +1346,21 @@ async def play(ctx: commands.Context, members=None):
             members = set([host] + members)
 
         locate_host_first()
-    players = [await Player.create(member) for member in members]
+    players = [await Player.get(member) for member in members]
     opening = OpeningView(*players)
     if opening.players:
         for player in opening.players:
             player.icon = await player.get_icon()
     await ctx.send(opening.build_start_sentence(), view=opening)
 
-
-token = myinfo.tokens.tempo_debugging
-tonkatu_id = myinfo.members["とんかつ"]
-yaruzo_id = myinfo.members["やるぞう"]
+try:
+    from CountDownBot import config
+except:
+    pass
+else:
+    token = config.tokens.tempo_debugging
+    tonkatu_id = config.members["とんかつ"]
+    yaruzo_id = config.members["やるぞう"]
 bot.run(token)
 
 # yet
@@ -1363,3 +1400,10 @@ bot.run(token)
 # 豆知識
 # 半角=1, 全角=2, 絵文字=3スペース　５スペース目からボタンの大きさは変わる。
 # だいたいなんでも25lengthまで。ボタンの文字数とか、1つのviewに入るComponent(buttonとかSelectとか)の数とか。１つのSelectに入るoptionの数とか。
+
+
+# ターンエンドとかのaction viewだけインタラクション失敗する
+# ゲーム後ログおかしい　間違えたのが載ってなかったりする
+# カウントダウン動いてない
+# ルール説明ほしい
+# ゲーム時間２０分ほしい
