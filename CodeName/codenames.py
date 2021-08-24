@@ -11,7 +11,15 @@ import discord
 from discord.ext import commands
 
 from CountDownBot.cogs.avatar_emoji_register import AvatarEmojiRegister
+from CountDownBot.cogs.utils.timers import AioDeltaCountdown, CountdownAsTask
+from CountDownBot.cogs.utils.timers import AioDeltaSleeper
 
+num_emojis = ['0⃣', '1⃣', '2⃣', '3⃣', '4⃣', '5⃣', '6⃣', '7⃣', '8⃣', '9⃣']
+num_zenkakus = ['０', '１', '２', '３', '４', '５', '６', '７', '８', '９']
+num_kanjis = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+
+for_std_num_trans = str.maketrans("".join([char1 + char2 for char1, char2 in zip(num_zenkakus, num_kanjis)]),
+                                  "".join([str(i) + str(i) for i in range(10)]))
 
 if __name__ == "__main__":
     log_format = "%(levelname)s\t%(name)s\t%(message)s\tlocation:%(pathname)s(%(lineno)s)\tfn:%(funcName)s"
@@ -152,7 +160,7 @@ class Player:
         message = await self.channel.send("いくつのキーワードを想定してる？")
 
         async def add_num_emojis():
-            for emoji in codenameにあったutils.num_emojis[1::]:
+            for emoji in num_emojis[1::]:
                 try:
                     await message.add_reaction(emoji=emoji)
                 except discord.errors.NotFound:
@@ -164,7 +172,7 @@ class Player:
             if user.bot:
                 return False
             if reaction.message == message:
-                if reaction.emoji in codenameにあったutils.num_emojis:
+                if reaction.emoji in num_emojis:
                     return True
 
         try:
@@ -173,7 +181,7 @@ class Player:
             result = None
         else:
             result = None
-            for i, emoji in enumerate(codenameにあったutils.num_emojis[1::]):
+            for i, emoji in enumerate(num_emojis[1::]):
                 if emoji == reaction.emoji:
                     result = i + 1
         finally:
@@ -403,7 +411,7 @@ class Team:
     def __init__(self):
         self.players: List[Player] = []
         self.status_table = None
-        self.timer = codenameにあったutils.AioCountdown(self.DEFAULT_TIME_LIMITS * 60, self.lose_game)
+        self.timer = CountdownAsTask(self.DEFAULT_TIME_LIMITS * 60, self.lose_game)
         self.on_turn = False
 
         self.players_on_hint = []
@@ -637,7 +645,7 @@ class KeywordsView(discord.ui.View):
 
     def __init__(self, words: List[str], game: "GameTypes",
                  *players: Player, row_count: Optional[int] = None, column_count: Optional[int] = None):
-        super().__init__()
+        super().__init__(timeout=None)
         self.words = words
         self.game: GameTypes = game
         self.players = list(players)
@@ -714,7 +722,7 @@ class GameBase:
         self.action_messages: Dict[Player: discord.Message] = dict()
         self.spectators_view = None
         self.delta_timer = None
-        self.resend_task: Optional[codenameにあったutils.AioCountdown] = None
+        self.resend_task: Optional[AioDeltaCountdown] = None
         self.teams: Union[List[Team]] = list(teams)
         self.spectators: Optional[List[Player]] = None
 
@@ -756,7 +764,7 @@ class GameBase:
             team.set_view(self)
             if team == next_team:
                 team.on_turn = True
-                team.timer.start()
+                team.timer.run_count_task()
             for player in team.players:
                 player.game = self
                 await player.show_game_messages()
@@ -800,7 +808,7 @@ class GameBase:
             # Repeat since multiple characters might represent number. ex. 12
             if self.hint_count is None:
                 try:
-                    translated = hint_str[-1 * slice_length:].translate(codenameにあったutils.for_std_num_trans)  # 漢数字なども
+                    translated = hint_str[-1 * slice_length:].translate(for_std_num_trans)  # 漢数字なども
                     self.hint_count = int(translated)
                 except ValueError:
                     break
@@ -1015,7 +1023,7 @@ class GameBase:
         self.current_team.on_turn = False
         next_team = next(self.next_team_generator)
         next_team.on_turn = True
-        self.current_team.timer.start()
+        self.current_team.timer.run_count_task()
         self.open_log.on_advance_turn()
         self.log_for_review.on_advance_turn()
         await self.update_game_messages(prioritized_player=prioritized_player)
@@ -1105,7 +1113,7 @@ class AnswerActionsView(discord.ui.View):
     children: List[discord.Component]
 
     def __init__(self, game: "GameTypes", log: Optional[discord.ui.Select] = None):
-        super().__init__()
+        super().__init__(timeout=None)
         self.game: GameBase = game
         if log:
             self.add_item(log)
@@ -1132,7 +1140,7 @@ class AnswerActionsView(discord.ui.View):
 
 class HintingActionsView(discord.ui.View):
     def __init__(self, game):
-        super().__init__()
+        super().__init__(timeout=None)
         self.game = game
 
     @discord.ui.button(label=SUGGESTION, style=discord.ButtonStyle.primary)
@@ -1305,25 +1313,25 @@ bot.add_cog(avatar_register_cog)
 sample_view = None
 
 
-@bot.listen()
-async def on_interaction(interaction):
-    print(interaction)
-    try:
-        await interaction.response.defer() #print(interaction)
-    except discord.errors.NotFound:
-        pass
+# @bot.listen()
+# async def on_interaction(interaction):
+#     print(interaction)
+#     try:
+#         await interaction.response.defer() #print(interaction)
+#     except discord.errors.NotFound:
+#         pass
 
 
-@bot.command()
-async def debug(_):
-    guild = bot.get_guild(config.servers_id.実験場)
-    tonkatu = guild.get_member(tonkatu_id)
-    yaruzo = guild.get_member(yaruzo_id)
-    players = await Player.get(tonkatu), await Player.get(yaruzo)
-    startview = OpeningView(*players)
-    startview.set_random_teams()
-    game: GameTypes = startview.current_game_mode(*startview.teams, words=startview.words)
-    await game.start()
+# @bot.command()
+# async def debug(_):
+#     guild = bot.get_guild(config.servers_id.実験場)
+#     tonkatu = guild.get_member(tonkatu_id)
+#     yaruzo = guild.get_member(yaruzo_id)
+#     players = await Player.get(tonkatu), await Player.get(yaruzo)
+#     startview = OpeningView(*players)
+#     startview.set_random_teams()
+#     game: GameTypes = startview.current_game_mode(*startview.teams, words=startview.words)
+#     await game.start()
 
 
 @bot.command()
@@ -1354,13 +1362,13 @@ async def play(ctx: commands.Context, members=None):
     await ctx.send(opening.build_start_sentence(), view=opening)
 
 try:
-    from CountDownBot import config
+    import config
 except:
     pass
 else:
-    token = config.tokens.tempo_debugging
-    tonkatu_id = config.members["とんかつ"]
-    yaruzo_id = config.members["やるぞう"]
+    token = config.token
+    # tonkatu_id = config.members["とんかつ"]
+    # yaruzo_id = config.members["やるぞう"]
 bot.run(token)
 
 # yet
