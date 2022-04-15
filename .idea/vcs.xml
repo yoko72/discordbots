@@ -2,6 +2,6 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/CountDownBot" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/autotimer/autotimer/cogs/emoji_timer" vcs="Git" />
   </component>
 </project>

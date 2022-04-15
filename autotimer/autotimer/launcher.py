@@ -1,0 +1,3 @@
+import unicodedata
+
+a = unicodedata

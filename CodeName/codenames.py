@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable
 from itertools import cycle
@@ -8,11 +7,11 @@ from random import shuffle
 from typing import Union, Optional, List, Dict, Tuple
 
 import discord
-from discord.ext import commands
-
+import unicodedata
 from CountDownBot.cogs.avatar_emoji_register import AvatarEmojiRegister
 from CountDownBot.cogs.utils.timers import AioDeltaCountdown, CountdownAsTask
 from CountDownBot.cogs.utils.timers import AioDeltaSleeper
+from discord.ext import commands
 
 num_emojis = ['0⃣', '1⃣', '2⃣', '3⃣', '4⃣', '5⃣', '6⃣', '7⃣', '8⃣', '9⃣']
 num_zenkakus = ['０', '１', '２', '３', '４', '５', '６', '７', '８', '９']
@@ -1206,6 +1205,7 @@ class OpeningView(discord.ui.View):
         self.started = False
         self.words = None
         self.specified_mode = None
+        self.opening_message = None
 
     def set_random_teams(self):
         self.teams = []
@@ -1268,8 +1268,10 @@ class OpeningView(discord.ui.View):
             raise InvalidTeams("Not enough number of teams, perhaps because of not enough amount of members."
                                "This game requires more than one player.")
 
+    # @defer_response
     @discord.ui.button(label=JOIN, style=discord.ButtonStyle.primary)
     async def join(self, _, interaction: discord.Interaction):
+        await interaction.response.defer()
         guild = interaction.guild
         author = interaction.user
         member = guild.get_member(author.id)
@@ -1279,9 +1281,7 @@ class OpeningView(discord.ui.View):
             if not self.specified_mode:
                 self.set_random_teams()
             sentence = self.build_start_sentence()
-            await interaction.response.edit_message(content=sentence, view=self)
-        else:
-            await interaction.response.send_message("もう君はゲーム参加してるよ！", ephemeral=True)
+            await self.opening_message.edit(content=sentence, view=self)
 
     @discord.ui.button(label=START, style=discord.ButtonStyle.green)
     async def start(self, _, interaction: discord.Interaction):
@@ -1359,7 +1359,9 @@ async def play(ctx: commands.Context, members=None):
     if opening.players:
         for player in opening.players:
             player.icon = await player.get_icon()
-    await ctx.send(opening.build_start_sentence(), view=opening)
+    message = await ctx.send(opening.build_start_sentence(), view=opening)
+    opening.opening_message = message
+
 
 try:
     import config
@@ -1371,6 +1373,8 @@ else:
     # yaruzo_id = config.members["やるぞう"]
 bot.run(token)
 
+# TODO サドンデス 実装
+# ログが２５超えてて事故る
 # yet
 # 外した時にメッセージが変わらない, 自動ヒントログもない
 
